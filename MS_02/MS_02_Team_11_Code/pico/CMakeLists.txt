@@ -55,3 +55,17 @@ target_include_directories(Pico PRIVATE
 
 pico_add_extra_outputs(Pico)
 
+
+# ---------- Drivers library (every driver .c file goes in here) ----------
+add_library(drivers STATIC
+    drivers/led.c
+)
+target_include_directories(drivers PUBLIC ${CMAKE_CURRENT_LIST_DIR}/drivers)
+target_link_libraries(drivers PUBLIC pico_stdlib hardware_pwm)
+
+# ---------- Tests: one separate program per driver ----------
+add_executable(test_led tests/test_led.c)
+target_link_libraries(test_led PRIVATE drivers)
+pico_enable_stdio_uart(test_led 0)   # UART0 (GP0/GP1) is reserved for the ESP32 link
+pico_enable_stdio_usb(test_led 1)
+pico_add_extra_outputs(test_led)
