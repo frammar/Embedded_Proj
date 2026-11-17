@@ -60,6 +60,8 @@ pico_add_extra_outputs(Pico)
 add_library(drivers STATIC
     drivers/led.c
     drivers/ultrasonic.c
+    drivers/motor.c
+
 
 )
 target_include_directories(drivers PUBLIC ${CMAKE_CURRENT_LIST_DIR}/drivers)
@@ -76,3 +78,8 @@ target_link_libraries(test_ultrasonic PRIVATE drivers)
 pico_enable_stdio_uart(test_ultrasonic 0)
 pico_enable_stdio_usb(test_ultrasonic 1)
 pico_add_extra_outputs(test_ultrasonic)
+add_executable(test_motor tests/test_motor.c)
+target_link_libraries(test_motor PRIVATE drivers)
+pico_enable_stdio_uart(test_motor 0)
+pico_enable_stdio_usb(test_motor 1)
+pico_add_extra_outputs(test_motor)
