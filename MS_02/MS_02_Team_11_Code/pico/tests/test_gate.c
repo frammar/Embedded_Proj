@@ -31,7 +31,6 @@ int main() {
 
     printf("\nd = drop (gate open 5 s, then close)\n");
     printf("r = reset latch: 1st press opens, 2nd press closes\n");
-    printf("o = open gate   c = close gate\n");
 
     while (true) {
         int ch = getchar();

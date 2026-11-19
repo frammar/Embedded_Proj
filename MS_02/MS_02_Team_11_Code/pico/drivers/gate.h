@@ -5,13 +5,11 @@
 #include "pins.h"
 
 // ---- EDIT THESE with the angles you measured ----
-#define GATE_L_CLOSED_DEG   90
-#define GATE_L_OPEN_DEG      0
-#define GATE_R_CLOSED_DEG   90
-#define GATE_R_OPEN_DEG    180
-#define LATCH_LOCKED_DEG    90
-#define LATCH_RELEASED_DEG   0
-#define DROP_OPEN_MS   5000
+#define GATE_L_CLOSED_DEG   90   // drop latch (GP14), closed
+#define GATE_L_OPEN_DEG      0   // drop latch (GP14), open
+#define LATCH_LOCKED_DEG    90   // reset servo (GP18), normal state
+#define LATCH_RELEASED_DEG  45   // reset servo (GP18), open
+#define DROP_OPEN_MS      5000
 // --------------------------------------------------
 
 void gate_init(void);      // all servos ready, gate closed, latch locked
