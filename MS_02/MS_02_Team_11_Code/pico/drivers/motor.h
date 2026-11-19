@@ -2,15 +2,14 @@
 #define MOTOR_H
 
 #include "pico/stdlib.h"
+#include "pins.h"
 
-#define MOTOR_ENA_PIN 6
-#define MOTOR_IN1_PIN 7
-#define MOTOR_IN2_PIN 8
-#define MOTOR_MAX_PCT 85   // 9 V supply, 6 V motor: never go above this
+#define MOTOR_MAX_PCT 85
 
 void motor_init(void);
-void motor_forward(uint8_t pct);    // 0..100, clamped to MOTOR_MAX_PCT
+void motor_forward(uint8_t pct);
 void motor_backward(uint8_t pct);
-void motor_stop(void);
+void motor_stop(void);    // coast
+void motor_brake(void);   // sharp stop (both inputs high)
 
 #endif

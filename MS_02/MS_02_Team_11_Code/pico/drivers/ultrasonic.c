@@ -44,7 +44,7 @@ float us_read_cm(void) {
     for (int i = 0; i < US_SAMPLES; i++) {
         float d = read_once();
         if (d >= 2.0f && d <= 400.0f) v[n++] = d;   // the sensor's valid range
-        sleep_ms(10);                               // let old echoes die out
+        sleep_ms(30);                               // let old echoes die out
     }
     if (n < 3) return -1.0f;                        // too few good readings
 
