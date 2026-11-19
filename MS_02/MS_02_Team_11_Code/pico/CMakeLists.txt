@@ -63,6 +63,8 @@ add_library(drivers STATIC
     drivers/motor.c
     drivers/servo.c
     drivers/buzzer.c
+    drivers/gate.c 
+
 )
 target_include_directories(drivers PUBLIC ${CMAKE_CURRENT_LIST_DIR}/drivers)
 target_link_libraries(drivers PUBLIC pico_stdlib hardware_pwm)
@@ -97,3 +99,9 @@ target_link_libraries(test_buzzer PRIVATE drivers)
 pico_enable_stdio_uart(test_buzzer 0)
 pico_enable_stdio_usb(test_buzzer 1)
 pico_add_extra_outputs(test_buzzer)
+
+add_executable(test_gate tests/test_gate.c)
+target_link_libraries(test_gate PRIVATE drivers)
+pico_enable_stdio_uart(test_gate 0)
+pico_enable_stdio_usb(test_gate 1)
+pico_add_extra_outputs(test_gate)
