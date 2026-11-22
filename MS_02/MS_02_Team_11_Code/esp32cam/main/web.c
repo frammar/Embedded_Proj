@@ -8,6 +8,9 @@
 #include "nvs_flash.h"
 #include "camera.h"
 #include "esp_timer.h"
+#include "setup.h"
+#include "vision.h"
+#include "app.h"
 
 #define AP_SSID "Factory4"
 #define AP_PASS "factory4pass"      // must be at least 8 characters
@@ -106,7 +109,13 @@ void web_start(void) {
     cfg.lru_purge_enable = true;   // when slots are full, drop the oldest idle connection
     cfg.recv_wait_timeout = 2;     // idle connections get cut after 2 s, not 5 s
     cfg.send_wait_timeout = 2;
+    cfg.max_uri_handlers = 24;
+    cfg.stack_size = 8192;
     ESP_ERROR_CHECK(httpd_start(&server, &cfg));
+
+    setup_register(server);
+    vision_start(server);
+    app_register(server);
 
     httpd_uri_t root   = { .uri = "/",       .method = HTTP_GET, .handler = root_handler   };
     httpd_uri_t photo  = { .uri = "/photo",  .method = HTTP_GET, .handler = photo_handler  };

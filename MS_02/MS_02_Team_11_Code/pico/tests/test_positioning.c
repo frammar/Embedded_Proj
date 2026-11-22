@@ -15,13 +15,25 @@
 #define SETTLE_MS             120     // wait after each pulse before measuring
 #define TOL_CM                0.3f    // "arrived" tolerance; must be >= half a fine step
 #define COARSE_ABOVE_CM       1.5f    // use coarse pulses when farther than this
-#define NEAR_LIMIT_CM         2.1f
-#define FAR_LIMIT_CM          9.7f
 #define W_INCREASES_DISTANCE  1       // w (forward, moves right) raises the distance
 #define AGREE_CM              0.4f    // readings must agree within this
-#define AGREE_COUNT           3       // ... this many times in a row
-#define GOTO_TIMEOUT_MS       10000
+#define AGREE_COUNT           2       // ... this many times in a row
+#define GOTO_TIMEOUT_MS       20000
 #define NUM_SLOTS             3
+
+// Travel limits come from the calibrated slots (no fixed near/far numbers):
+//   run mode:         lowest slot - margin  ...  highest slot + margin
+//   calibration mode: only the sensor sanity range below (jog in small steps and watch the trolley!)
+#define LIMIT_MARGIN_CM       1.0f    // how far past the outer slots the trolley may go
+#define ABS_MIN_CM            2.5f    // sensor sanity range, used only while calibrating
+#define ABS_MAX_CM            60.0f
+#define NO_MOVE_WARN_CM       0.1f    // jog warns if the distance changed less than this
+
+// Outlier rejection (jump filter)
+#define ALLOW_STILL_CM        0.6f    // max change vs last accepted reading when nothing moved
+#define ALLOW_AFTER_FINE_CM   1.5f    // max change allowed right after a fine pulse
+#define ALLOW_AFTER_COARSE_CM 5.0f    // max change allowed right after a coarse pulse
+#define JUMP_RETRIES          3       // re-measure this many times before accepting a jump
 // --------------------------------
 
 typedef enum { DIR_FORWARD, DIR_BACKWARD } dir_t;   // forward = key w
@@ -35,13 +47,38 @@ typedef enum { DIR_FORWARD, DIR_BACKWARD } dir_t;   // forward = key w
 
 static float slot_cm[NUM_SLOTS];
 static bool  slot_set[NUM_SLOTS];
+static bool  g_calib = true;               // true = calibration mode, false = run mode
 
 // Servo state (gate_init() closes the gate and locks the latch at start-up)
 static bool gate_is_open  = false;
 static bool latch_is_open = false;
 
+// Jump filter state
+static float last_good = -1.0f;            // last accepted distance
+static float allow_cm  = ALLOW_STILL_CM;   // how far the next reading may differ from last_good
+
+static bool all_saved(void) {
+    for (int i = 0; i < NUM_SLOTS; i++) if (!slot_set[i]) return false;
+    return true;
+}
+
+// Allowed travel range. In run mode it is built from the saved slot distances.
+static void get_limits(float *lo, float *hi) {
+    if (g_calib || !all_saved()) { *lo = ABS_MIN_CM; *hi = ABS_MAX_CM; return; }
+    float mn = slot_cm[0], mx = slot_cm[0];
+    for (int i = 1; i < NUM_SLOTS; i++) {
+        if (slot_cm[i] < mn) mn = slot_cm[i];
+        if (slot_cm[i] > mx) mx = slot_cm[i];
+    }
+    *lo = mn - LIMIT_MARGIN_CM;
+    *hi = mx + LIMIT_MARGIN_CM;
+}
+
 // One short move: kick, cruise, brake, wait for the trolley to settle.
 static void pulse(dir_t d, uint ms) {
+    // after a move, the next reading is allowed to differ more
+    allow_cm = (ms >= STEP_COARSE_MS) ? ALLOW_AFTER_COARSE_CM : ALLOW_AFTER_FINE_CM;
+
     if (d == DIR_FORWARD) motor_forward(KICK_PCT); else motor_backward(KICK_PCT);
     sleep_ms(KICK_MS);
     if (d == DIR_FORWARD) motor_forward(SPEED_PCT); else motor_backward(SPEED_PCT);
@@ -51,8 +88,8 @@ static void pulse(dir_t d, uint ms) {
     motor_stop();
 }
 
-// Returns the average of AGREE_COUNT consecutive agreeing readings, or -1.
-static float stable_cm(void) {
+// Average of AGREE_COUNT consecutive agreeing readings, or -1.
+static float stable_raw(void) {
     float sum = 0, last = 0;
     int cnt = 0;
     for (int tries = 0; tries < 12; tries++) {
@@ -65,20 +102,40 @@ static float stable_cm(void) {
     return -1.0f;
 }
 
+// Stable reading with jump rejection: a big change while nothing moved is re-measured.
+static float stable_cm(void) {
+    float cand = -1.0f;
+    for (int attempt = 0; attempt < JUMP_RETRIES; attempt++) {
+        cand = stable_raw();
+        if (cand < 0) return -1.0f;
+        if (last_good < 0 || fabsf(cand - last_good) <= allow_cm) break;   // plausible
+        sleep_ms(100);                                  // suspicious jump: measure again
+    }
+    last_good = cand;      // after JUMP_RETRIES jumps in a row we accept it as real
+    allow_cm  = ALLOW_STILL_CM;
+    return cand;
+}
+
 // Jog one pulse, refusing to go past the limits or when blind.
 static void jog(dir_t dir, uint ms) {
+    float lo, hi;
+    get_limits(&lo, &hi);
     float d = stable_cm();
     if (d < 0) { printf("refused: no stable reading\n"); return; }
-    if (dir == DIR_INC && d >= FAR_LIMIT_CM)  { printf("refused: far limit (%.2f)\n", d); return; }
-    if (dir == DIR_DEC && d <= NEAR_LIMIT_CM) { printf("refused: near limit (%.2f)\n", d); return; }
+    if (dir == DIR_INC && d >= hi) { printf("refused: upper limit (%.2f)\n", d); return; }
+    if (dir == DIR_DEC && d <= lo) { printf("refused: lower limit (%.2f)\n", d); return; }
     pulse(dir, ms);
     float after = stable_cm();
-    if (after < 0) printf("moved, no stable reading\n");
-    else           printf("distance %.2f cm\n", after);
+    if (after < 0) { printf("moved, no stable reading\n"); return; }
+    printf("distance %.2f cm\n", after);
+    if (fabsf(after - d) < NO_MOVE_WARN_CM)
+        printf("warning: trolley barely moved (end stop or stall?)\n");
 }
 
 // Drive to target_cm using the sensor as feedback.
 static bool goto_cm(float target) {
+    float lo, hi;
+    get_limits(&lo, &hi);
     absolute_time_t t0 = get_absolute_time();
     while (absolute_time_diff_us(t0, get_absolute_time()) < (int64_t)GOTO_TIMEOUT_MS * 1000) {
         float d = stable_cm();
@@ -86,17 +143,12 @@ static bool goto_cm(float target) {
         float err = target - d;
         if (fabsf(err) <= TOL_CM) { printf("arrived at %.2f cm (target %.2f)\n", d, target); return true; }
         dir_t dir = (err > 0) ? DIR_INC : DIR_DEC;
-        if (dir == DIR_INC && d >= FAR_LIMIT_CM)  { printf("ABORT: far limit\n");  return false; }
-        if (dir == DIR_DEC && d <= NEAR_LIMIT_CM) { printf("ABORT: near limit\n"); return false; }
+        if (dir == DIR_INC && d >= hi) { printf("ABORT: upper limit\n"); return false; }
+        if (dir == DIR_DEC && d <= lo) { printf("ABORT: lower limit\n"); return false; }
         pulse(dir, fabsf(err) > COARSE_ABOVE_CM ? STEP_COARSE_MS : STEP_FINE_MS);
     }
     printf("ABORT: timeout\n");
     return false;
-}
-
-static bool all_saved(void) {
-    for (int i = 0; i < NUM_SLOTS; i++) if (!slot_set[i]) return false;
-    return true;
 }
 
 // ---------- servo controls ----------
@@ -120,14 +172,16 @@ static void drop_now(void) {
     printf("gate closed\n");
 }
 
-static void print_help(bool calib) {
-    if (calib) {
+static void print_help(void) {
+    if (g_calib) {
         printf("\n=== CALIBRATION ===\n");
-        printf("w/s = fine jog right/left   W/S = coarse jog\n");
+        printf("w/s = fine jog right/left   W/S = coarse jog (small steps, watch the trolley!)\n");
         printf("1/2/3 = save current distance as slot 1/2/3\n");
         printf("p = show distance   x = finish calibration (needs all 3)\n");
     } else {
-        printf("\n=== RUN ===\n");
+        float lo, hi;
+        get_limits(&lo, &hi);
+        printf("\n=== RUN ===  (limits %.2f .. %.2f cm)\n", lo, hi);
         printf("1/2/3 = go to slot   p = show distance   c = recalibrate\n");
     }
     printf("g = gate toggle   d = timed drop   r = reset latch toggle\n");
@@ -140,8 +194,7 @@ int main(void) {
     gate_init();     // closes the gate, then locks the latch
     while (!stdio_usb_connected()) sleep_ms(100);
 
-    bool calib = true;
-    print_help(calib);
+    print_help();
 
     while (true) {
         int ch = getchar();
@@ -155,7 +208,7 @@ int main(void) {
         if (ch == 'r') { latch_toggle(); continue; }
         if (ch == 'd') { drop_now();     continue; }
 
-        if (calib) {
+        if (g_calib) {
             switch (ch) {
                 case 'w': jog(DIR_FORWARD,  STEP_FINE_MS);   break;
                 case 's': jog(DIR_BACKWARD, STEP_FINE_MS);   break;
@@ -170,9 +223,11 @@ int main(void) {
                     break;
                 }
                 case 'x':
-                    if (all_saved()) { calib = false; print_help(calib);
-                        printf("slots: %.2f / %.2f / %.2f cm\n", slot_cm[0], slot_cm[1], slot_cm[2]); }
-                    else printf("save all 3 slots first\n");
+                    if (all_saved()) {
+                        g_calib = false;
+                        printf("slots: %.2f / %.2f / %.2f cm\n", slot_cm[0], slot_cm[1], slot_cm[2]);
+                        print_help();
+                    } else printf("save all 3 slots first\n");
                     break;
                 default: break;   // ignore Enter and other keys
             }
@@ -184,7 +239,7 @@ int main(void) {
                     goto_cm(slot_cm[i]);
                     break;
                 }
-                case 'c': calib = true; print_help(calib); break;
+                case 'c': g_calib = true; print_help(); break;   // saved slots are kept until you re-save them
                 default: break;
             }
         }

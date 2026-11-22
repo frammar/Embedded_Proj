@@ -63,11 +63,13 @@ add_library(drivers STATIC
     drivers/motor.c
     drivers/servo.c
     drivers/buzzer.c
-    drivers/gate.c 
+    drivers/gate.c
+    drivers/esp_link.c
+    drivers/link.c
 
 )
 target_include_directories(drivers PUBLIC ${CMAKE_CURRENT_LIST_DIR}/drivers)
-target_link_libraries(drivers PUBLIC pico_stdlib hardware_pwm)
+target_link_libraries(drivers PUBLIC pico_stdlib hardware_pwm hardware_uart)
 
 # ---------- Tests: one separate program per driver ----------
 add_executable(test_led tests/test_led.c)
@@ -123,3 +125,15 @@ target_link_libraries(test_positioning drivers)
 pico_enable_stdio_uart(test_positioning 0)
 pico_enable_stdio_usb(test_positioning 1)
 pico_add_extra_outputs(test_positioning)
+
+add_executable(test_link tests/test_link.c)
+target_link_libraries(test_link drivers)
+pico_enable_stdio_uart(test_link 0)
+pico_enable_stdio_usb(test_link 1)
+pico_add_extra_outputs(test_link)
+
+add_executable(factory4 factory4.c)
+target_link_libraries(factory4 drivers)
+pico_enable_stdio_uart(factory4 0)
+pico_enable_stdio_usb(factory4 1)
+pico_add_extra_outputs(factory4)

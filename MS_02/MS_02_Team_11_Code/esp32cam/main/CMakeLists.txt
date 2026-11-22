@@ -1,2 +1,1 @@
-idf_component_register(SRCS "esp32cam.c" "camera.c" "web.c"
-                       INCLUDE_DIRS ".")
+idf_component_register(SRCS "app.c" "esp32cam.c" "camera.c" "web.c" "setup.c" "vision.c" "app.c" INCLUDE_DIRS ".")
